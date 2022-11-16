@@ -1,0 +1,153 @@
+TIPS iniciales:
+cambiar en sqleditor
+
+1.-mysqlssession- cambiar todos los tiempos de conexion a 1000
+2.-quitar el check de safeupdates
+
+-------------------------------------------------------------------------------------------------------------------------
+
+Pasos a seguir para la insercion
+1. revisar cada tabla para la carga.
+	- anotar los separadores
+	- anotar si tiene carateres especiales \r
+2.-preparar cada tabla para que este en csv con UTF sin BOOM.
+	-Utilizar el Visual studio code para ver que tipo de archivo es, pero usar mejor notepad++
+	y verificar que todos esten en csv utf8 sin boom.
+	-crear las tablas en el sql y asegurarnos que estan con CHARSET= utf8mb4 COLLATE= utf8mb4_spanish_ci;
+	-si vemos que los valores que son cantidad o precio tienen valores nulos definirlos como varchar para luego cambiarlos.
+
+CREATE TABLE IF NOT EXISTS tipo_gasto(
+	IdTipoGasto			int(11) NOT NULL AUTO_INCREMENT,
+	Descripcion			varchar(100) NOT NULL,
+	Monto_Aproximado	DECIMAL(10,2) NOT NULL,
+    PRIMARY KEY (IdTipoGasto)
+    ) ENGINE= InnoDB DEFAULT CHARSET= utf8mb4 COLLATE= utf8mb4_spanish_ci;
+
+create table if not exists sucursal(
+	ID				INTEGER,
+	Sucursal		VARCHAR(30),
+	Direccion		VARCHAR(150),
+	Localidad		VARCHAR(80),
+	Provincia		VARCHAR(80),
+	Latitud			VARCHAR(30),
+	Longitud		VARCHAR(30)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE= utf8mb4_spanish_ci;
+  
+Carga de datos---
+
+-sucursal - colocar los separadores que documentos en el paso 1 por cada tabla-
+
+LOAD DATA INFILE 'C:\\ProgramData\\MySQL\\MySQL Server 8.0\\Uploads\\Sucursales.csv'
+into table sucursal
+fields terminated by ';' enclosed by '' escaped by ''
+lines terminated by '\n' ignore 1 lines;
+
+  ojo si te olvidaste de revisar el collate es el mismo en todas las tablas y tienes problemas al hacer los querys puedes usar
+ALTER TABLE venta CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_spanish_ci;
+
+-------------------------------------------------------------------------------------------------------------------------
+
+Pasos a seguir para la normalizacion de la tabla.
+1. revisar los campos nulos se puede utilizar este select por cada tabla colocando los campos que quieras revisar 
+
+SELECT SUM(CASE idCliente WHEN '' THEN 1 ELSE 0 END) 'idClientes Nulos',
+       SUM(CASE provincia WHEN '' THEN 1 ELSE 0 END) 'Provincias Nulos',
+       SUM(CASE nombreyApellido WHEN '' THEN 1 ELSE 0 END) 'Nombres Nulos',
+       SUM(CASE domicilio WHEN '' THEN 1 ELSE 0 END) 'Domicilios Nulos',
+       SUM(CASE telefono WHEN '' THEN 1 ELSE 0 END) 'Telefonos Nulos',
+       SUM(CASE edad WHEN '' THEN 1 ELSE 0 END) 'Edades Nulos',
+       SUM(CASE localidad WHEN '' THEN 1 ELSE 0 END) 'Localidades Nulos',
+       SUM(CASE latitud WHEN '' THEN 1 ELSE 0 END) 'Latitudes Nulos',
+       SUM(CASE longitud WHEN '' THEN 1 ELSE 0 END) 'Longitudes Nulos'
+FROM cliente;
+
+
+2.- revisar si hay repetidos- minimo debe revisarse en cada id y verificar por descripciones, nombres
+	-- revisando si hay valores repetidos de ID  
+		select * from cliente where ID in (select distinct(ID) from cliente group by ID having count(*)>1) order by ID -- 0 registros
+	-- revisando si hay valores repetidos en esta combinatoria   
+		select distinct Nombre_y_Apellido,Telefono, count(*) from cliente group by Nombre_y_Apellido,telefono  having count(*) > 1; --
+
+
+3.- Normalizar los nombres de los campos y colocar el tipo de dato adecuado para cada uno en cada una de las tablas. 
+	-para cambiar un columna
+		alter table cliente change Id Idcliente INT(11) NOT NULL ;
+
+	-para solo cambiar el nombre
+		alter table cliente rename column id to idcliente;
+
+	para dropear la columna
+		alter table empleado drop column sector;
+
+	para hacer update
+		UPDATE venta SET Cantidad = REPLACE(Cantidad, '\r', '');
+
+	usando la funcion
+		update empleado set apellido	=UC_words(TRIM(apellido)),
+				Nombre		=UC_words(TRIM(nombre)),
+                 		sucursal		=UC_words(TRIM(sucursal)),
+				sector		=UC_words(TRIM(sector)),
+				cargo			=UC_words(TRIM(cargo));
+	-
+	/*Imputar Valores Faltantes*/
+	UPDATE `cliente` SET Domicilio = 'Sin Dato' WHERE TRIM(Domicilio) = "" OR ISNULL(Domicilio);
+	UPDATE `cliente` SET Localidad = 'Sin Dato' WHERE TRIM(Localidad) = "" OR ISNULL(Localidad);
+	-
+
+
+4.- sacar todos los campos que son repetidos en mas de una tabla o que se refieren a categorizar el dato y crear tablas con id.
+	actualizar el id en cada una de las tablas y luego borrar
+		CREATE TABLE IF NOT EXISTS `cargo` (
+ 		 `IdCargo` int(11) NOT NULL AUTO_INCREMENT,
+ 		 `Cargo` varchar(50) NOT NULL,
+ 		 PRIMARY KEY (`IdCargo`)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+		INSERT INTO cargo (Cargo) SELECT DISTINCT Cargo FROM empleado ORDER BY 1;
+
+-------------------------------------------------------------------------------------------------------------------------
+
+deteccion de outlier para registrarlos en una tabla de auditoria para revision
+1.- primero armar el select
+
+SELECT v.*, o.promedio, o.maximo 
+from venta v
+JOIN (SELECT IdProducto, avg(Cantidad) as promedio, avg(Cantidad) + (3 * stddev(Cantidad)) as maximo
+	from venta
+	GROUP BY IdProducto) o
+ON (v.IdProducto = o.IdProducto)
+WHERE v.Cantidad > o.maximo;
+luego crear la tabla e insertar
+
+
+INSERT into aux_venta
+select v.IdVenta, v.Fecha, v.Fecha_Entrega, v.IdCliente, v.IdSucursal, v.IdEmpleado,
+v.IdProducto, v.Precio, v.Cantidad, 2
+from venta v
+JOIN (SELECT IdProducto, avg(Cantidad) as promedio, stddev(Cantidad) as Desv
+	from venta
+	GROUP BY IdProducto) v2
+ON (v.IdProducto = v2.IdProducto)
+WHERE v.Cantidad > (v2.Promedio + (3*v2.Desv)) OR v.Cantidad < (v2.Promedio - (3*v2.Desv)) OR v.Cantidad < 0;
+
+-------------------------------------------------------------------------------------------------------------------------
+
+para armar los querys
+consideraciones 
+
+join entre tablas por los id
+en el group by no se colocas la etiqueta as
+
+SELECT c.anio, c.trimestre, tp.TipoProducto, SUM(v.Precio * v.Cantidad) as venta
+FROM venta v
+JOIN producto p ON(p.IdProducto = v.IdProducto)
+JOIN tipo_producto tp ON(tp.IdTipoProducto = p.IdTipoProducto)
+JOIN calendario c ON(c.Fecha = v.Fecha)
+GROUP BY c.anio, c.trimestre, tp.TipoProducto
+ORDER BY c.anio, c.trimestre, tp.TipoProducto;
+
+crear la tabla a traves de un copy
+
+create table venta_prueba as select * from venta;
+
+ALTER TABLE market_sales ADD COLUMN IdSales INT NOT NULL AUTO_INCREMENT FIRST, ADD PRIMARY KEY IdSales(IdSales);

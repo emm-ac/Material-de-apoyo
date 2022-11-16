@@ -1,0 +1,21 @@
+let
+    lista_fechas = Table.Column(Venta, "FechaOrden"),
+    fecha_minima = List.Min(lista_fechas),
+    fecha_maxima = List.Max(lista_fechas),
+    dias = Number.From(fecha_maxima - fecha_minima) + 1,
+    fechas = List.Dates(fecha_minima, dias, #duration(1,0,0,0)),
+    #"Convertida en tabla" = Table.FromList(fechas, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Tipo cambiado" = Table.TransformColumnTypes(#"Convertida en tabla",{{"Column1", type date}}),
+    #"Columnas con nombre cambiado" = Table.RenameColumns(#"Tipo cambiado",{{"Column1", "Fecha"}}),
+    #"Año insertado" = Table.AddColumn(#"Columnas con nombre cambiado", "Año", each Date.Year([Fecha]), Int64.Type),
+    #"Nombre del mes insertado" = Table.AddColumn(#"Año insertado", "Nombre del mes", each Date.MonthName([Fecha]), type text),
+    #"Semana del mes insertada" = Table.AddColumn(#"Nombre del mes insertado", "Semana del mes", each Date.WeekOfMonth([Fecha]), Int64.Type),
+    #"Día insertado" = Table.AddColumn(#"Semana del mes insertada", "Día", each Date.Day([Fecha]), Int64.Type),
+    #"Columna duplicada" = Table.DuplicateColumn(#"Día insertado", "Fecha", "Fecha - Copia"),
+    #"Trimestre calculado" = Table.TransformColumns(#"Columna duplicada",{{"Fecha - Copia", Date.QuarterOfYear, Int64.Type}}),
+    #"Columnas con nombre cambiado1" = Table.RenameColumns(#"Trimestre calculado",{{"Fecha - Copia", "Trimeste"}})
+in
+    #"Columnas con nombre cambiado1"
+
+
+* Cambiar en la segunda línea el nombre de la tabla y columna a las que debe hacer referencia.
